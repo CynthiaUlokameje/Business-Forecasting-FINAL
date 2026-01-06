@@ -1,0 +1,380 @@
+---
+title: "Business Forecasting FINAL"
+author: "Cynthia Ulokameje"
+date: "2025-12-07"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(fpp3)
+
+```
+
+# QUESTION 1
+
+## a)
+ 
+```{r}
+
+# Filter tourism for Sydney, Business & Holiday
+sydney_tourism <- tourism %>% 
+  filter(Region == "Sydney", Purpose %in% c("Business", "Holiday"))
+
+sydney_tourism
+ 
+```
+
+## b)
+
+```{r}
+sydney_tourism %>% 
+  autoplot(Trips) +
+  labs(title = "Sydney tourist visits – Business vs Holiday",
+       y = "Thousands of trips", x = "Quarter")
+
+```
+
+For the business line it seems there is a strong quarterly seasonality with a number of sharp spikes and dips. It stays within the same general range but post 2013 there seems to be an upward trend. 
+
+For the holiday line there is a clearer quarterly seasonal variation structure than in business. Seemed to have a slight downward direction in early 2000's but generally becomes stable and stays in the same range with no obvious spike or dips like with business.
+
+## c)
+
+```{r}
+
+# Keep only Sydney–Business
+syd_business <- sydney_tourism %>% 
+  filter(Purpose == "Business")
+
+# ETS(A,N,N) ≡ simple exponential smoothing
+fit_ses <- syd_business %>% 
+  model(SES = ETS(Trips ~ error("A") + trend("N") + season("N")))
+
+report(fit_ses)
+
+```
+For Sydney Business visits, the exponential smoothing model ETS(A,N,N) estimates optimal values for a = 0.2212188 and l[0] = 596.3572.
+
+```{r}
+ fc_ses <- fit_ses %>% 
+  forecast(h = 6)
+
+fc_ses %>% 
+  autoplot(syd_business) +
+  labs(title = "Sydney Business – SES (ETS(A,N,N)) forecasts",
+       y = "Thousands of trips", x = "Quarter")
+ 
+```
+
+## d)
+
+```{r}
+ # 90% interval for 1st forecast
+
+ses_pi90 <- fc_ses |>
+  head(1) |>                         
+  mutate(interval = hilo(Trips, 90)) |>  
+  pull(interval)                      
+
+ses_pi90
+
+```
+
+The 90% predication interval for the first SES forecast is (603.5913, 946.8645).
+
+## e)
+
+```{r}
+
+fit_AMA <- syd_business %>% 
+  model(AMA = ETS(Trips ~ error("A") + trend("M") + season("A")))
+
+report(fit_AMA)
+
+fc_AMA <- fit_AMA %>% 
+  forecast(h = 6)
+
+fc_AMA %>% 
+  autoplot(syd_business) +
+  labs(title = "Sydney Business Trips – ETS(A,M,A)",
+       y = "Trips ('000s)", x = "Quarter")
+ 
+
+ 
+```
+
+## f)
+```{r}
+ 
+ fit_auto_ets <- syd_business %>% 
+  model(auto = ETS(Trips))
+
+report(fit_auto_ets)
+
+fc_auto_ets <- fit_auto_ets %>% 
+  forecast(h = 6)
+
+fc_auto_ets %>% 
+  autoplot(syd_business) +
+  labs(title = "Sydney Business – automatic ETS() forecasts",
+       y = "Thousands of trips", x = "Quarter")
+
+ 
+```
+
+The system has generated model ETS(M,N,A) so there are multiplicative errors so the variability of the series grows with level, N for no trend and A for Additive seasonal for the strong quarterly seasonality. So the ETS() model chose something that has clear seasonality, modest level changes and variability that scales with level which is a good choice for this series.
+
+## g)
+
+```{r}
+ fit_reg <- syd_business %>% 
+  model(reg = TSLM(Trips ~ trend() + season()))
+
+report(fit_reg)
+
+```
+
+Looking at the result, the trend coefficient is not statistically significant (so there isnt evidence of a linear trend) but the intercept and all the predictor variables are all positive and significant. Seeing that the F-statistic p-value = 0.0008 which is much smaller than 0.05, the model as a whole is statistically significant. 
+
+## h)
+
+```{r}
+ 
+# Split into train / test
+n <- nrow(syd_business)
+train_bus <- syd_business %>% slice(1:(n - 6))
+test_bus  <- syd_business %>% slice((n - 5):n)
+
+# Refit all models on the training set
+fit_all <- train_bus %>% 
+  model(
+    SES   = ETS(Trips ~ error("A") + trend("N") + season("N")),
+    AMA   = ETS(Trips ~ error("A") + trend("M") + season("A")),
+    auto  = ETS(Trips),
+    reg   = TSLM(Trips ~ trend() + season()))
+
+# 6-step ahead forecasts 
+fc_all <- fit_all %>% forecast(h = 6)
+
+# Compare errors on the test set
+acc <- accuracy(fc_all, test_bus)
+acc
+ 
+```
+
+Paying close attention to the 6 step ahead forecast on the sample RMSE and MAE, it seems the best model is ETS(A,M,A) as it has the lowest RMSE/MAE of 101.3235 and 91.63359.
+
+## i)
+
+```{r}
+ 
+# Residual diagnostics for AMA
+
+fit_AMA %>% 
+  select(AMA) %>% 
+  gg_tsresiduals()
+ 
+```
+
+Examining the residuals here, the time plots residual fluctuates normally around 0 with no obvious trend or pattern, all the autocorrelation lie within the blue significance lines for the acf, and the histogram is roughly symmetric with a little skew at the right. Altogether this shows that that the ETS(A,M,A) model behaves like white noise so it is adequate for forecasting.
+
+
+# QUESTION 2
+
+## a) 
+```{r}
+ 
+wheat_1890 <- prices |>
+  filter(year >= 1890) |>
+  select(wheat) |>
+  drop_na()
+wheat_1890
+ 
+```
+
+## b)
+
+```{r}
+ 
+# Historical plot
+wheat_1890 |>
+  autoplot(wheat) +
+  labs(title = "Adjusted wheat prices (from 1890)",
+       y = "Price (adjusted, in GBP)")
+
+# ACF of original series
+wheat_1890 |>
+  ACF(wheat) |>
+  autoplot() +
+  labs(title = "ACF of wheat prices (level)")
+
+```
+
+The time plot show a long term trend with level changes and the ACF also shows many positive lags out of the blue bands decaying over time so it is not stationary. 
+
+```{r}
+ # Transformation: log + first difference
+wheat_stationary <- wheat_1890 |>
+  mutate(log_wheat = log(wheat),
+         dlog_wheat = difference(log_wheat))
+
+# Display transformed series (differenced log)
+wheat_stationary |>
+  filter(!is.na(dlog_wheat)) |>
+  autoplot(dlog_wheat) +
+  labs(title = "Differenced log wheat prices",
+       y = "Change in log(wheat)")
+
+ 
+```
+
+So to make it stationary we transforms it by using to stabilize the variance and then difference it, so the differences log graph looks roughly stationary and there inst too much variance like there was before.
+
+## c)
+
+```{r}
+wheat_stationary |>
+  filter(!is.na(dlog_wheat)) |>
+  ACF(dlog_wheat) |>
+  autoplot() +
+  labs(title = "ACF of differenced log wheat prices",
+       y = "ACF")
+ 
+```
+
+From the ACF graph I'm learning that the series is now stationary as most autocorrelations fall within the blue bounds, and there is onlya large negative spike at lag 1. The series now suggests an MA(1) component.
+
+## d)
+
+```{r}
+
+ wheat_stationary |>
+  filter(!is.na(dlog_wheat)) |>
+  PACF(dlog_wheat) |>
+  autoplot() +
+  labs(title = "PACF of differenced log wheat prices",
+       y = "PACF")
+
+ 
+```
+
+Based on the PACF graph of the stationary data, there is one significant spike at lag 1 and the remaining fall within the blue bounds, it also decays gradually and does show a clear cut off after lag 1 so this supports the MA(1) component as well. 
+
+# e)
+
+```{r}
+ 
+wheat_fit_manual <- wheat_1890 |>
+  mutate(log_wheat = log(wheat)) |>
+  model(
+    arima011 = ARIMA(log_wheat ~ pdq(0,1,1)))
+
+report(wheat_fit_manual)
+ 
+```
+
+ I'm choosing ARIMA (0,1,1) because of the 1 order of difference and MA(1) component.
+
+## f)
+
+```{r}
+ 
+# Residual diagnostics for manual model
+wheat_fit_manual |>
+  gg_tsresiduals()
+
+# Ljung–Box test on residuals
+wheat_fit_manual |>
+  augment() |>
+  features(.innov, ljung_box, lag = 10, dof = 1)
+
+ 
+```
+
+The residuals for ARIMA (0,1,1) show no visible patterns in the residual time plot, the ACF has no significant autocorrelations just one is out of the blue bounds, the histogram is roughly symmetric, and just for extra the l-jung box at lag 10 has a p-value of 0.29, which means there is no evidence of remaining autocorrelation. All this indicates that the residuals do resemble white noise and this model is a good fit. 
+
+## g)
+
+```{r}
+wheat_fit_auto <- wheat_1890 |>
+  mutate(log_wheat = log(wheat)) |>
+  model(
+    auto = ARIMA(log_wheat))
+
+report(wheat_fit_auto)
+
+# Residual diagnostics
+wheat_fit_auto |>
+  gg_tsresiduals()
+
+wheat_fit_auto |>
+  augment() |>
+  features(.innov, ljung_box, lag = 10, dof = 2)
+
+ 
+```
+
+The model that was chosen was ARIMA (0,1,2) after using ARIMA() function of log(wheat).The residual shows no obvious patterns in time plot, not significant autocorrelations in ACF and a roughly symmetric histogram although there is some skew. I checked l-jung box for further confirmation and p-value is 0.9862366 which means there is no evidence of remaining autocorrelation. All this indicates that the residuals do resemble white noise and ARIMA(0,1,2) model is a good fit.
+
+## h)
+
+```{r}
+ 
+wheat_fit_ets <- wheat_1890 |>
+  mutate(log_wheat = log(wheat)) |>
+  model(
+    ets_auto = ETS(log_wheat))
+
+report(wheat_fit_ets)
+ 
+```
+
+Since this is a series with trend but no seasonality it seems the ETS(A,N,N) was chosen and is a good model. 
+
+## i)
+
+```{r}
+ 
+wheat_models <- wheat_1890 |>
+  mutate(log_wheat = log(wheat)) |>
+  model(
+    arima_manual = ARIMA(log_wheat ~ pdq(0,1,1)),
+    arima_auto   = ARIMA(log_wheat),
+    ets_auto     = ETS(log_wheat))
+
+glance(wheat_models)   
+
+ 
+```
+
+The ARIMA(0,1,2) model has the smallest AICc (about –125.1), slightly better than the ARIMA(0,1,1) model (AICc ≈ –118.5), while the ETS model has a much larger AICc (about 81). Since both ARIMA models have residuals that resemble white noise and the ARIMA(0,1,2) model achieves the lowest AICc, I conclude that the automatic ARIMA(0,1,2) model is the best of the three.
+
+## j)
+
+```{r}
+
+# Add log_wheat once
+wheat_1890_log <- wheat_1890 |>
+  mutate(log_wheat = log(wheat))
+
+# Fit best model on log_wheat
+wheat_fit_auto <- wheat_1890_log |>
+  model(
+    auto = ARIMA(log_wheat))
+
+# 10-year ahead forecast
+wheat_fc <- wheat_fit_auto |>
+  forecast(h = 10)
+
+# Plot forecasts (log scale)
+wheat_fc |>
+  autoplot(wheat_1890_log) +
+  labs(title = "10-year forecasts of log wheat prices",
+       y = "log(wheat)")
+
+ 
+```
+
+Using the best model of the automatic ARIMA(0,1,2) fitted to log(wheat), I produced forecasts for the next 10 years. The point forecasts stay close to the recent level of adjusted for inflation wheat prices, showing no strong upward or downward trend. The forecast intervals widen as the horizon increases, indicating growing uncertainty about future prices. This behavior is consistent with a differenced ARIMA model. The best forecast is roughly flat in the long run, but there seems to be a lot uncertainty around that level
